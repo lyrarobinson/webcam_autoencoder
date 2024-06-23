@@ -6,7 +6,7 @@
 
 clone the repo, cd into that directory:
 ```
-gh repo clone lyrarobinson/clipcat_tool
+gh repo clone lyrarobinson/webcam_autoencoder
 cd webcam-autoencoder
 ```
 
