@@ -7,7 +7,7 @@
 clone the repo, cd into that directory:
 ```
 gh repo clone lyrarobinson/webcam_autoencoder
-cd webcam-autoencoder
+cd webcam_autoencoder
 ```
 
 recommended to make a new environment with conda:
