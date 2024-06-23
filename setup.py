@@ -3,7 +3,7 @@ from setuptools import setup
 setup(
     name='webcam_autoencoder',
     version='0.1',
-    py_modules=['main', 'makegrids'],  # List all top-level modules here
+    py_modules=['main', 'makegrids'], 
     install_requires=[
         'pygame==2.5.2',
         'numpy==1.26.4',
