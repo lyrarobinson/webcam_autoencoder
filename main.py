@@ -1,86 +1,79 @@
-import pygame
-import numpy as np
 import cv2
+import numpy as np
+import pygame
 from tensorflow.keras.models import load_model
 from tensorflow.keras.losses import MeanSquaredError
 
+def crop_to_square(frame):
+    height, width = frame.shape[:2]
+    size = min(height, width)
+    top_left_x = (width - size) // 2
+    top_left_y = (height - size) // 2
+    cropped_frame = frame[top_left_y:top_left_y + size, top_left_x:top_left_x + size]
+    
+    # Resize the cropped square to 224x224
+    resized_frame = cv2.resize(cropped_frame, (224, 224), interpolation=cv2.INTER_AREA)
+    return resized_frame
+
+def preprocess_frame(frame):
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    frame = crop_to_square(frame)
+    # Now frame is a 224x224 grayscale image
+    input_grid = cv2.resize(frame, (7, 7), interpolation=cv2.INTER_AREA).astype(np.float32)
+    input_grid /= 255.0
+    return input_grid.flatten().reshape(1, 49)
+
+def adjust_contrast_brightness(image, alpha=5.0, beta=100):
+    """ Adjust contrast (alpha) and brightness (beta) more aggressively """
+    return cv2.convertScaleAbs(image, alpha=alpha, beta=beta)
+
 def main():
-    # Load the model with an explicitly defined loss function
-    autoencoder = load_model('autoencoder.h5', custom_objects={'mse': MeanSquaredError()})
+    custom_objects = {'mse': MeanSquaredError()}
+    model = load_model('autoencoder.h5', custom_objects=custom_objects)
 
-    # Pygame setup
-    pygame.init()
-    width, height = 700, 700
-    screen = pygame.display.set_mode((width, height))
-    pygame.display.set_caption('webcam_autoencoder')
-    background_color = (0, 0, 0)
-
-    cap = cv2.VideoCapture(0)  # 0 is typically the default camera
+    cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("Error: Could not open webcam.")
         return
 
-    def normalize_image(image):
-        # Normalize to [0, 1]
-        image = (image - image.min()) / (image.max() - image.min())
-        # Scale to [0, 255]
-        image = (image * 255).astype(np.uint8)
-        return image
-
-	def update_display(data):
-		# Normalize the 7x7 data for model input
-		normalized_data = data / 255.0  # Assuming data is in the range [0, 255]
-		normalized_data = normalized_data.flatten().reshape(1, 49)  # Model expects shape (1, 49)
-		
-		# Predict the output using the autoencoder
-		predicted_image = autoencoder.predict(normalized_data)
-		predicted_image = predicted_image.squeeze()
-        predicted_image = normalize_image(predicted_image)
-
-        if len(predicted_image.shape) == 2:
-            predicted_image = np.stack((predicted_image,) * 3, axis=-1)
-
-        predicted_image = np.transpose(predicted_image, (1, 0, 2))
-        pygame_image = pygame.surfarray.make_surface(predicted_image)
-        pygame_image = pygame.transform.scale(pygame_image, (width, height))
-        screen.blit(pygame_image, (0, 0))
-        pygame.display.flip()
-
-	def process_frame(frame):
-		# Assuming the default resolution is higher than 980x980
-		height, width = frame.shape[:2]
-		# Calculate margins to crop the center square
-		top = (height - 980) // 2
-		left = (width - 980) // 2
-		cropped_frame = frame[top:top+980, left:left+980]
-
-		# Divide the 980x980 frame into a 7x7 grid of squares each 140x140
-		grid_size = 140
-		squares = []
-		for y in range(0, 980, grid_size):
-			for x in range(0, 980, grid_size):
-				square = cropped_frame[y:y+grid_size, x:x+grid_size]
-				average_intensity = np.mean(square)
-				squares.append(average_intensity)
-		
-		# Reshape the list of averages into a 7x7 grid
-		processed_frame = np.array(squares).reshape((7, 7))
-		return processed_frame
+    pygame.init()
+    window_size = (800, 800)
+    screen = pygame.display.set_mode(window_size)
+    pygame.display.set_caption("Autoencoder Live Feed")
 
     running = True
     while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+
         ret, frame = cap.read()
         if not ret:
-            print("Failed to grab frame")
+            print("Failed to grab frame.")
             break
 
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # Convert to grayscale
-        processed_frame = process_frame(frame)  # Process to square and resize
-        update_display(np.array(processed_frame, dtype=float))  # Pass the processed frame for display
+        input_grid = preprocess_frame(frame)
+        output_image = model.predict(input_grid)[0]
+        output_image = (output_image * 255).astype(np.uint8)
 
-        for event in pygame.event.get():
-            if event.type is pygame.QUIT:
-                running = False
+        print(f"Debug: Output shape before any processing: {output_image.shape}")
+        print(f"Debug: Sample pixel values (before RGB conversion): {output_image[0:5, 0:5]}")
+
+        if output_image.ndim == 3 and output_image.shape[2] == 1:
+            output_image = np.repeat(output_image, 3, axis=2)
+            print(f"Debug: Converted to RGB with shape: {output_image.shape}")
+            print(f"Debug: Sample pixel values (after RGB conversion): {output_image[0:5, 0:5, :]}")
+
+        if output_image.ndim != 3 or output_image.shape[2] != 3:
+            raise ValueError("Output image must be 3D with 3 channels for RGB.")
+
+        # Aggressively adjust brightness and contrast
+        output_image = adjust_contrast_brightness(output_image, alpha=5.0, beta=100)
+
+        pygame_image = pygame.surfarray.make_surface(output_image)
+        pygame_image = pygame.transform.scale(pygame_image, window_size)
+        screen.blit(pygame_image, (0, 0))
+        pygame.display.flip()
 
     cap.release()
     pygame.quit()
